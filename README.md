@@ -43,14 +43,45 @@ the usual symptom of a Pages misconfiguration.
 Because the sheet is the source of truth, the deployed static site only needs
 outbound access to Google — there is no server to run.
 
+### Custom domain
+
+A custom domain serves a project site from the **root** of that domain, not from
+`/<repo>/`, so the base path changes. Drop the hostname in `public/CNAME`:
+
+```bash
+mkdir -p public
+echo "birdie-tracker.mattise.dev" > public/CNAME   # hostname only: no https://, no trailing slash
+```
+
+`vite.config.ts` detects that file and switches `base` to `/` automatically. Also set
+the domain under **Settings → Pages → Custom domain** and enable **Enforce HTTPS**
+once the certificate is issued. With an Actions-based deployment GitHub does *not*
+create the `CNAME` file for you — it must live in the repo.
+
+DNS at the registrar, for the subdomain `birdie-tracker`:
+
+| Type | Host | Value | TTL |
+| --- | --- | --- | --- |
+| CNAME | `birdie-tracker` | `nmattise.github.io.` | Automatic |
+
+Check it with `dig +short birdie-tracker.mattise.dev CNAME` — it should print
+`nmattise.github.io.`. An apex domain (`mattise.dev`) can't use a CNAME; it needs
+GitHub's A records instead.
+
+Verify the switch before trusting it:
+
+```bash
+grep -o 'src="[^"]*"' dist/index.html    # should start with /assets/, not /<repo>/assets/
+```
+
 ### Vercel instead
 
-Import the repo and leave the defaults; `base` resolves to `/` because
-`GITHUB_REPOSITORY` is unset. Add `VITE_SHEETS_ENDPOINT` under *Settings →
-Environment Variables*, then redeploy.
+Import the repo and leave the defaults; `base` resolves to `/` there either way. Add
+`VITE_SHEETS_ENDPOINT` under *Settings → Environment Variables*, then redeploy.
 
 ### One thing to know
 
-A `?board=` id is generated per origin, so moving from `localhost:5173` to your
-Pages URL gives you a fresh card. Open the old share link (or point its `board`
-param at the new domain) to keep the same scorecard.
+A `?board=` id is generated per origin, so the custom domain starts with an empty
+local cache even though the sheet already holds your data. Open
+`https://birdie-tracker.mattise.dev/?board=<id>` to pull the same card, then use
+**Share** to hand out the new link.

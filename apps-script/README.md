@@ -56,6 +56,11 @@ curl "$VITE_SHEETS_ENDPOINT?id=test123"          # -> your board
 - Writes are debounced 800 ms in the client and serialized with `LockService` on the
   server, but this is not a database: simultaneous edits to the *same* card can lose
   one side. Fine for one foursome, not for many editors.
+- **Writes bypass CORS on purpose.** Apps Script answers every `POST` with a `302` to
+  `script.googleusercontent.com`, and Safari refuses to follow that redirect under CORS
+  (`Fetch API cannot load … due to access control checks`). The client therefore sends
+  writes with `mode: 'no-cors'` and then reads the card back to confirm it landed, so a
+  failed write still shows `OFFLINE` and gets retried instead of being reported as saved.
 - `localStorage` remains the offline cache, so the card still works on the course with
   no signal and syncs when the connection returns.
 - Apps Script quotas are generous for this use (thousands of calls per day), but each

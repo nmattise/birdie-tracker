@@ -98,22 +98,76 @@ export function readLegacyBoard(): Board | null {
   }
 }
 
+/**
+ * Apps Script answers with HTTP 200 even when the script throws, and with an HTML
+ * login page when the deployment is not public, so the body must be inspected
+ * rather than just the status code.
+ */
+async function call(path: string, init?: RequestInit): Promise<unknown> {
+  const response = await fetch(`${endpoint}${path}`, init);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} from the sheet endpoint — ${text.slice(0, 300)}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `The sheet endpoint returned ${response.headers.get('content-type') ?? 'unknown content'} instead of JSON. ` +
+      'Usually the Web app is not deployed with access "Anyone", you are using the /dev URL instead of /exec, ' +
+      `or the script threw. Response started with: ${text.slice(0, 200)}`,
+    );
+  }
+
+  if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+    throw new Error(`Apps Script reported: ${String((parsed as { error: unknown }).error)}`);
+  }
+
+  return parsed;
+}
+
 export async function fetchBoard(id: string): Promise<Board | null> {
-  const response = await fetch(`${endpoint}?id=${encodeURIComponent(id)}`);
-  if (!response.ok) throw new Error(`Load failed: ${response.status}`);
-  const data: unknown = await response.json();
+  const data = await call(`?id=${encodeURIComponent(id)}`);
   return toBoard(data);
 }
 
+/**
+ * Apps Script always answers POST with a 302 to script.googleusercontent.com, and
+ * Safari refuses to follow that redirect under CORS. The response was never used,
+ * so send the write outside CORS and confirm it with a read instead.
+ */
 export async function pushBoard(id: string, board: Board): Promise<void> {
-  const response = await fetch(endpoint, {
+  await fetch(endpoint, {
     method: 'POST',
-    // text/plain keeps this a simple request so the browser never sends a CORS preflight,
-    // which Apps Script web apps cannot answer.
+    mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ id, board }),
   });
-  if (!response.ok) throw new Error(`Save failed: ${response.status}`);
+}
+
+/** Key-order-independent serialization, for comparing cards across the wire. */
+export function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stable((value as Record<string, unknown>)[key])}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Writes the card, then reads it back so the caller knows it actually landed. */
+export async function saveBoard(id: string, board: Board): Promise<void> {
+  await pushBoard(id, board);
+  const stored = await fetchBoard(id);
+  if (!stored) throw new Error('The sheet has no copy of this card yet — will retry.');
+  if (stable(stored) !== stable(board)) {
+    throw new Error('The sheet returned a different card than the one just written — will retry.');
+  }
 }
 
 export function shareLink(id: string): string {

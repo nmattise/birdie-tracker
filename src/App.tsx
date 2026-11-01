@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Flag, Pencil, Plus, Settings2, Share2, Trash2, X } from 'lucide-react';
 import {
-  fetchBoard, pushBoard, readCache, readLegacyBoard, resolveBoardId, shareLink,
-  starter, syncEnabled, uid, writeCache,
+  fetchBoard, readCache, readLegacyBoard, resolveBoardId, saveBoard, shareLink,
+  stable, starter, syncEnabled, uid, writeCache,
   type Board, type Category, type Player,
 } from './boardApi';
 
@@ -51,16 +51,17 @@ function App() {
         const remote = await fetchBoard(boardId);
         if (cancelled) return;
         if (remote) {
-          savedRef.current = JSON.stringify(remote);
+          savedRef.current = stable(remote);
           setBoard(remote);
         }
         hydratedRef.current = true;
         setSyncState('saved');
         // A brand new board needs a first row before anyone can join it.
         if (!remote) await save(boardRef.current);
-      } catch {
+      } catch (error) {
         if (cancelled) return;
         hydratedRef.current = true;
+        console.warn('[clubhouse] could not load the shared card:', error);
         setSyncState('offline');
       }
     })();
@@ -68,14 +69,15 @@ function App() {
   }, []);
 
   async function save(next: Board) {
-    const json = JSON.stringify(next);
+    const json = stable(next);
     if (json === savedRef.current) return;
     setSyncState('saving');
     try {
-      await pushBoard(boardId, next);
+      await saveBoard(boardId, next);
       savedRef.current = json;
       setSyncState('saved');
-    } catch {
+    } catch (error) {
+      console.warn('[clubhouse] could not save to the sheet:', error);
       setSyncState('offline');
     }
   }
@@ -85,7 +87,7 @@ function App() {
     boardRef.current = board;
     if (!writeCache(boardId, board)) setNotice('Unable to save changes on this device');
     if (!syncEnabled || !hydratedRef.current) return;
-    if (JSON.stringify(board) === savedRef.current) return;
+    if (stable(board) === savedRef.current) return;
 
     window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => { void save(board); }, 800);
@@ -98,7 +100,7 @@ function App() {
     if (!syncEnabled) return;
     const interval = window.setInterval(async () => {
       if (document.hidden || !hydratedRef.current) return;
-      if (JSON.stringify(boardRef.current) !== savedRef.current) {
+      if (stable(boardRef.current) !== savedRef.current) {
         if (!isEditing()) void save(boardRef.current);
         return;
       }
@@ -106,8 +108,8 @@ function App() {
       try {
         const remote = await fetchBoard(boardId);
         if (!remote || isEditing()) return;
-        if (JSON.stringify(boardRef.current) !== savedRef.current) return;
-        const json = JSON.stringify(remote);
+        if (stable(boardRef.current) !== savedRef.current) return;
+        const json = stable(remote);
         if (json === savedRef.current) return;
         savedRef.current = json;
         setBoard(remote);
